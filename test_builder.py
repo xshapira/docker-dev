@@ -61,8 +61,8 @@ def test_build_plan():
     plan = build.build_plan(images, changes)
     assert plan[0]['name'] == 'power-tmux'
     assert plan[1]['name'] == 'nvim'
-    assert plan[2]['name'] == 'nodejs-dev' or plan[2]['name'] == 'py-dev'
-    assert plan[3]['name'] == 'nodejs-dev' or plan[3]['name'] == 'py-dev'
+    assert plan[2]['name'] in ['nodejs-dev', 'py-dev']
+    assert plan[3]['name'] in ['nodejs-dev', 'py-dev']
     assert len(plan) == 4
 
 

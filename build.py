@@ -68,24 +68,19 @@ def expand_images_config(images):
 
 
 def parse_image_dependency(image):
-    file = open(path.join('images', image['path'], 'Dockerfile'), 'r')
-    contents = file.read()
-    file.close()
-    baseimage = re.search('\n*\\s*FROM\\s+(\\S+)\n', contents).group(1)
+    with open(path.join('images', image['path'], 'Dockerfile'), 'r') as file:
+        contents = file.read()
+    baseimage = re.search('\n*\\s*FROM\\s+(\\S+)\n', contents)[1]
 
     # Due to build args, I can't easily determine statically which tag my image
     # depends on. Will probably implement more accurate algorithm later.
     untagged = baseimage.split(':')[0]
     parts = untagged.split('/')
-    if len(parts) != 2:
-        return untagged
-    else:
-        return parts[1]
+    return untagged if len(parts) != 2 else parts[1]
 
 
 def files_changed(ref):
-    diff = check_output(
-        ['git', 'diff', '--name-only', '{}~1..{}'.format(ref, ref)])
+    diff = check_output(['git', 'diff', '--name-only', f'{ref}~1..{ref}'])
     parts = str(diff, 'utf-8').split('\n')
     return filter(lambda l: len(l.strip()) > 0, parts)
 
@@ -121,21 +116,24 @@ def run_sh_tests(sh_dir, image):
 
 def vader_test_volume(file):
     basedir = path.dirname(__file__)
-    return path.join(basedir, path.dirname(file)) + ':/home/aghost-7/test'
+    return f'{path.join(basedir, path.dirname(file))}:/home/aghost-7/test'
 
 
 def run_vader_tests(image, vader_dir):
     for file in list_extensions(vader_dir, '.vader'):
-        code = call([
-            'podman',
-            'run',
-            '--rm',
-            '-t',
-            '-v',
-            vader_test_volume(file),
-            image['full_name'],
-            'nvim -c "Vader! ~/test/{}"'.format(path.basename(file))
-            ])
+        code = call(
+            [
+                'podman',
+                'run',
+                '--rm',
+                '-t',
+                '-v',
+                vader_test_volume(file),
+                image['full_name'],
+                f'nvim -c "Vader! ~/test/{path.basename(file)}"',
+            ]
+        )
+
         if code > 0:
             raise BuildException(image['full_name'], 'Vader tests', code)
 
@@ -153,14 +151,12 @@ def run_tests(image):
 
 
 def build_image(image):
-    print('\033[1;33mBuilding image: {}\033[0;0m'.format(image['full_name']))
+    print(f"\033[1;33mBuilding image: {image['full_name']}\033[0;0m")
     sys.stdout.flush()
     command = ['podman', 'build', '--pull', '--tag', image['full_name']]
     if 'args' in image:
         for k, v in image['args'].items():
-            command.append('--build-arg')
-            command.append(k + '=' + v)
-
+            command.extend(('--build-arg', f'{k}={v}'))
     command.append(path.join('images', image['path']))
     code = call(command)
     if code > 0:
@@ -182,10 +178,11 @@ def remove_image(image):
 def image_leaves(images):
     leaves = []
     for image in images:
-        leaf = True
-        for image_dependency in images:
-            if image_dependency['name'] == image['dependency']:
-                leaf = False
+        leaf = all(
+            image_dependency['name'] != image['dependency']
+            for image_dependency in images
+        )
+
         if leaf:
             leaves.append(image)
         image['leaf'] = leaf
@@ -223,28 +220,28 @@ def group_by_name(images):
 
 def build_plan(images, changes):
     result = []
-    changes_set = set([change['name'] for change in changes])
+    changes_set = {change['name'] for change in changes}
     scheduled = set()
     image_groups = group_by_name(images)
     for leaf in image_leaves(images):
         name = leaf['name']
         changed = name in changes_set
         if changed and name not in scheduled:
-            result.extend(image_groups[leaf['name']])
-            scheduled.add(leaf['name'])
+            result.extend(image_groups[name])
+            scheduled.add(name)
         build_tree(name, image_groups, changes_set, changed, scheduled, result)
 
     return result
 
 
 def print_blue(text):
-    print('\033[1;36m{}\033[0;0m'.format(text))
+    print(f'\033[1;36m{text}\033[0;0m')
 
 
 def print_plan(plan):
     print_blue('Build plan:')
     for image in plan:
-        print_blue('- {}'.format(image['full_name']))
+        print_blue(f"- {image['full_name']}")
     sys.stdout.flush()
 
 
@@ -267,7 +264,7 @@ if __name__ == "__main__":
         except BuildException as error:
             last_error = error
             if not image['leaf']:
-                error_exit(error)
+                error_exit(last_error)
         if image['leaf']:
             remove_image(image)
 
